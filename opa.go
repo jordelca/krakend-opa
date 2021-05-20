@@ -16,14 +16,13 @@ import (
 const Namespace = "github_com/jordelca/krakend-opa"
 
 func HandlerFactory(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkrakend.HandlerFactory {
-	logger.Info("OPA: HandlerFactory")
 	return OpaValidator(hf, logger)
 }
 
 func OpaValidator(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkrakend.HandlerFactory {
 	return func(cfg *config.EndpointConfig, prxy proxy.Proxy) gin.HandlerFunc {
 		handler := hf(cfg, prxy)
-		logger.Info("OPA: validator enabled for the endpoint")
+		logger.Info("OPA: validator enabled for the endpoint", cfg.Endpoint)
 
 		return func(c *gin.Context) {
 			if rand.Int()%2 == 0 {
