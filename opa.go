@@ -1,6 +1,7 @@
 package opa
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,7 +17,16 @@ import (
 )
 
 // Namespace is the key to look for extra configuration details
-const Namespace = "github_com/jordelca/krakend-opa"
+const Namespace = "github.com/jordelca/krakend-opa"
+
+type Config struct {
+	Host string
+	Port int
+}
+
+var (
+	ErrNoValidatorCfg = errors.New("OPA: no validator config")
+)
 
 func HandlerFactory(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkrakend.HandlerFactory {
 	return OpaValidator(hf, logger)
@@ -25,10 +35,19 @@ func HandlerFactory(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkrak
 func OpaValidator(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkrakend.HandlerFactory {
 	return func(cfg *config.EndpointConfig, prxy proxy.Proxy) gin.HandlerFunc {
 		handler := hf(cfg, prxy)
+		scfg, err := GetConfig(cfg)
+
+		if err == ErrNoValidatorCfg {
+			logger.Info("OPA: validator disabled for the endpoint", cfg.Endpoint)
+			return handler
+		}
+
+		logger.Info("OPA: Host", scfg.Host)
+		logger.Info("OPA: Port", scfg.Port)
+
 		logger.Info("OPA: validator enabled for the endpoint", cfg.Endpoint)
 
 		return func(c *gin.Context) {
-
 			receivedToken := strings.TrimPrefix(c.Request.Header.Get("Authorization"), "Bearer ")
 
 			parsedToken, err := jwt.Parse(receivedToken, nil)
@@ -43,9 +62,9 @@ func OpaValidator(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkraken
 				package example
 
 				default allow = false
-
+				
 				allow {
-					input.role = "admin"
+					input.role == "admin"
 				}
 			`
 
@@ -62,6 +81,7 @@ func OpaValidator(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkraken
 					map[string]interface{}{
 						"role":   claims["role"],
 						"method": c.Request.Method,
+						"token":  receivedToken,
 					},
 				),
 			)
@@ -78,8 +98,6 @@ func OpaValidator(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkraken
 			fmt.Println("len:", len(rs))
 			fmt.Println("user", c.Param("user"))
 			fmt.Println("bearer", c.Request.Header.Get("Authorization"))
-			fmt.Println("method", c.Request.Method)
-			fmt.Println("value:", rs[0].Expressions[0].Value)
 
 			if rs[0].Expressions[0].Value == false {
 				logger.Info("OPA: Unauthorized")
@@ -92,4 +110,31 @@ func OpaValidator(hf ginkrakend.HandlerFactory, logger logging.Logger) ginkraken
 			handler(c)
 		}
 	}
+}
+
+func GetConfig(cfg *config.EndpointConfig) (*Config, error) {
+	v, ok := cfg.ExtraConfig[Namespace]
+	if !ok {
+		return nil, ErrNoValidatorCfg
+	}
+	tmp, ok := v.(map[string]interface{})
+	if !ok {
+		return nil, ErrNoValidatorCfg
+	}
+	config := new(Config)
+	if v, ok := tmp["host"]; ok {
+		if name, ok := v.(string); ok {
+			config.Host = name
+		}
+	}
+	if v, ok := tmp["port"]; ok {
+		switch i := v.(type) {
+		case int:
+			config.Port = i
+		case float64:
+			config.Port = int(i)
+		}
+	}
+
+	return config, nil
 }
